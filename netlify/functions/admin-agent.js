@@ -17,7 +17,6 @@ const KNOWN_DESTINATIONS = [
 ];
 
 function extractDestinationSmart(text) {
-  // 1. فحص قائمة الدول والوجهات المعتمدة (مع دعم السوابق مثل لماليزيا، لتركيا، بكينيا)
   for (const dest of KNOWN_DESTINATIONS) {
     const reg = new RegExp("(?:^|[^\\u0621-\\u064A])(?:ل|ب|و|إلى |الى )?" + dest + "(?:$|[^\\u0621-\\u064A])", "i");
     if (reg.test(text)) {
@@ -25,7 +24,6 @@ function extractDestinationSmart(text) {
     }
   }
 
-  // 2. نمط الاستخراج المباشر بعد الكلمات الدالة بمسافة واضحة
   const patternMatch = text.match(/(?:فيزا|فيزه|تأشيرة|تاشيرة|باقة|باقه|سفر إلى|سفر الى|رحلة إلى|رحلة الى|إلى|الي)\s+([^\s*~_،,:.]+)/i);
   if (patternMatch && patternMatch[1] && patternMatch[1].length >= 3 && !/سياحية|سياحيه|عمل|زيارة|الكترونية|الكترونيه|جديدة/i.test(patternMatch[1])) {
     return patternMatch[1];
@@ -52,7 +50,7 @@ const SYSTEM_PROMPT = `
 7. الشات بوت: [القسم, الموضوع / الخدمة, التفاصيل والتعليمات والأسعار, نشط؟]
 
 ملاحظات هامة جداً:
-- في عمليات الحذف (DELETE): حدد الصفحة المستهدفة وضع نص الأمر في matchValue و explanation ولا تضع بيانات حقول وهمية.
+- في عمليات الحذف (DELETE): إذا كان الطلب حذف (مثل "احذف الصف رقم 5 من المتطلبات")، حدد الصفحة بدقة وضع نص الأمر كاملاً في matchValue و explanation ولا تضع أي حقول في data.
 - استخرج اسم الدولة/الوجهة بشكل صحيح بدون تشويه (مثال: فيزا فيتنام -> الوجهة: فيتنام، فيزا سنغافورة -> الوجهة: سنغافورة).
 
 يجب أن يكون ردك بصيغة JSON فقط بهذا الشكل:
@@ -121,6 +119,7 @@ function fallbackParseArabicPrompt(prompt) {
       operation: 'DELETE',
       matchColumn: 'الصف',
       matchValue: text,
+      userPrompt: text,
       explanation: `حذف من صفحة [${targetSheet}]: ${text}`,
       data: {}
     };
@@ -217,6 +216,7 @@ function fallbackParseArabicPrompt(prompt) {
     operation,
     matchColumn: targetSheet === 'جوازات' ? 'رقم الجواز' : 'اسم الباقة',
     matchValue: data['رقم الجواز'] || data['اسم الباقة'] || destination,
+    userPrompt: text,
     explanation: `تم استيعاب الأمر وتنظيمه في قسم [${targetSheet}]`,
     data
   };
@@ -299,58 +299,76 @@ export const handler = async (event, context) => {
       };
     }
 
-    const apiKey = GEMINI_API_KEY || body.geminiApiKey;
+    const trimmedPrompt = prompt.trim();
+    const isExplicitDelete = /^(?:احذف|حذف|ازل|إزالة|امسح|مسح|delete|remove)\b/i.test(trimmedPrompt) ||
+                             /(?:احذف|حذف|ازل|إزالة|امسح|مسح)\s+(?:الصف|الصفوف|سطر|أسطر|باقة|فيزا|تأشيرة|جواز|خبر|صورة|فيديو)/i.test(trimmedPrompt);
+
     let parsedAction = null;
 
-    if (apiKey) {
-      const geminiPayload = {
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              { text: SYSTEM_PROMPT },
-              { text: `طلب المشرف:\n"${prompt}"` }
-            ]
+    // في أوامر الحذف الصريحة، نستخدم المعالج المباشر لضمان عدم حدوث أي خطأ في التحليل
+    if (isExplicitDelete) {
+      parsedAction = fallbackParseArabicPrompt(trimmedPrompt);
+    } else {
+      const apiKey = GEMINI_API_KEY || body.geminiApiKey;
+
+      if (apiKey) {
+        const geminiPayload = {
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { text: SYSTEM_PROMPT },
+                { text: `طلب المشرف:\n"${trimmedPrompt}"` }
+              ]
+            }
+          ],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 1024,
+            responseMimeType: 'application/json'
           }
-        ],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 1024,
-          responseMimeType: 'application/json'
-        }
-      };
+        };
 
-      const candidateModels = [
-        process.env.GEMINI_MODEL,
-        'gemini-2.5-flash',
-        'gemini-2.0-flash',
-        'gemini-1.5-flash',
-        'gemini-1.5-pro'
-      ].filter(Boolean);
+        const candidateModels = [
+          process.env.GEMINI_MODEL,
+          'gemini-2.5-flash',
+          'gemini-2.0-flash',
+          'gemini-1.5-flash',
+          'gemini-1.5-pro'
+        ].filter(Boolean);
 
-      for (const model of candidateModels) {
-        try {
-          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-          const res = await fetch(geminiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(geminiPayload),
-          });
+        for (const model of candidateModels) {
+          try {
+            const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+            const res = await fetch(geminiUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(geminiPayload),
+            });
 
-          if (res.ok) {
-            const geminiData = await res.json();
-            const rawAiText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-            parsedAction = parseAiJson(rawAiText);
-            if (parsedAction && parsedAction.targetSheet) break;
+            if (res.ok) {
+              const geminiData = await res.json();
+              const rawAiText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+              parsedAction = parseAiJson(rawAiText);
+              if (parsedAction && parsedAction.targetSheet) break;
+            }
+          } catch (err) {
+            console.warn(`Model ${model} failed, trying next fallback:`, err.message);
           }
-        } catch (err) {
-          console.warn(`Model ${model} failed, trying next fallback:`, err.message);
         }
+      }
+
+      if (!parsedAction || !parsedAction.targetSheet) {
+        parsedAction = fallbackParseArabicPrompt(trimmedPrompt);
       }
     }
 
-    if (!parsedAction || !parsedAction.targetSheet) {
-      parsedAction = fallbackParseArabicPrompt(prompt);
+    // إرفاق نص الطلب الأصلي دائماً لضمان وصوله إلى Google Apps Script
+    if (parsedAction) {
+      parsedAction.userPrompt = trimmedPrompt;
+      if (!parsedAction.matchValue) {
+        parsedAction.matchValue = trimmedPrompt;
+      }
     }
 
     // 4. تنفيذ التعديل على Google Sheets

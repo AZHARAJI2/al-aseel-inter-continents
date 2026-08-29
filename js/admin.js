@@ -343,6 +343,9 @@ async function executeAiCommand() {
   let aiPlan = null;
   let execRes = null;
 
+  const isExplicitDelete = /^(?:احذف|حذف|ازل|إزالة|امسح|مسح|delete|remove)\b/i.test(prompt) ||
+                           /(?:احذف|حذف|ازل|إزالة|امسح|مسح)\s+(?:الصف|الصفوف|سطر|أسطر|باقة|فيزا|تأشيرة|جواز|خبر|صورة|فيديو)/i.test(prompt);
+
   try {
     // 1. Try serverless endpoint first
     try {
@@ -370,6 +373,19 @@ async function executeAiCommand() {
     // 2. Client-side Fallback Engine if server was offline or failed
     if (!aiPlan) {
       aiPlan = clientParseArabicPrompt(prompt);
+    }
+
+    if (isExplicitDelete && aiPlan) {
+      aiPlan.operation = 'DELETE';
+      aiPlan.userPrompt = prompt;
+      aiPlan.matchValue = prompt;
+      if (/متطلب|المتطلبات/i.test(prompt)) aiPlan.targetSheet = 'المتطلبات';
+      else if (/جواز|جوازات/i.test(prompt)) aiPlan.targetSheet = 'جوازات';
+      else if (/خبر|اخبار|أخبار/i.test(prompt)) aiPlan.targetSheet = 'الأخبار';
+      else if (/صور/i.test(prompt)) aiPlan.targetSheet = 'الصور';
+      else if (/فيديو/i.test(prompt)) aiPlan.targetSheet = 'الفيديو';
+      else if (/شات|بوت/i.test(prompt)) aiPlan.targetSheet = 'الشات بوت';
+      else if (!aiPlan.targetSheet) aiPlan.targetSheet = 'الباقات';
     }
 
     // 3. Direct Google Apps Script Execution if needed
@@ -433,7 +449,7 @@ async function executeAiCommand() {
     }
 
     input.value = '';
-    showToast(isSimulated ? '⚠️ تم التحليل (وضع المعاينة)' : (isSuccess ? '✅ تم تعديل Google Sheets بنجاح!' : '⚠️ تنبيه: ' + (execRes.error || '')), isSuccess ? 'success' : (isSimulated ? 'info' : 'error'));
+    showToast(isSimulated ? '⚠️ تم التحليل (وضع المعاينة)' : (isSuccess ? '✅ تم تنفيذ العملية في Google Sheets بنجاح!' : '⚠️ تنبيه: ' + (execRes.error || '')), isSuccess ? 'success' : (isSimulated ? 'info' : 'error'));
 
     if (isSuccess) {
       setTimeout(() => {

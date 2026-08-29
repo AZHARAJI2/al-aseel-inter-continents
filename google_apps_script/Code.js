@@ -497,21 +497,25 @@ function handleExecuteAction(ss, payload) {
   else if (opType === 'DELETE') {
     const rawMatch = (payload.matchValue || '').toString().trim();
     const explanation = (payload.explanation || '').toString().trim();
-    const combinedText = rawMatch + ' ' + explanation;
+    const userPrompt = (payload.userPrompt || payload.originalPrompt || payload.prompt || '').toString().trim();
+    const combinedText = userPrompt + ' ' + rawMatch + ' ' + explanation;
     const lastRow = sheet.getLastRow();
     let deletedCount = 0;
 
-    // أ) التحقق من أرقام الصفوف الصريحة (مثل: الصف رقم 4 و 5 أو الصف 4 أو سطر 2 و 3)
-    const rowMatches = combinedText.match(/(?:صف|صفوف|الصفوف|الصف|سطر|أسطر|اسطر)\s*(?:رقم|ارقام|أرقام)?\s*([0-9٠-٩\s,،وand\-]+)/i);
+    // أ) التحقق من أرقام الصفوف الصريحة (مثل: الصف رقم 4 و 5 أو الصف 5 أو سطر 2 و 3)
+    const rowMatches = combinedText.match(/(?:صف|صفوف|الصفوف|الصف|سطر|أسطر|اسطر|رقم|أرقام|ارقام)\s*(?:رقم|ارقام|أرقام)?\s*([0-9٠-٩\s,،وand\-]+)/i) ||
+                       combinedText.match(/([0-9٠-٩]+)\s*(?:من|في)?\s*(?:صفحة|جدول|تبويب|ورقة)?\s*(?:المتطلبات|الباقات|جوازات|الأخبار)/i);
+
     let explicitRows = [];
-    if (rowMatches && rowMatches[1]) {
+    if (rowMatches && (rowMatches[1] || rowMatches[0])) {
+      const targetStr = rowMatches[1] || rowMatches[0];
       const arToEn = function(s) {
         const arDigits = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
         let str = String(s);
         for (let k = 0; k < 10; k++) str = str.split(arDigits[k]).join(String(k));
         return str;
       };
-      const cleanDigits = arToEn(rowMatches[1]).match(/\d+/g);
+      const cleanDigits = arToEn(targetStr).match(/\d+/g);
       if (cleanDigits && cleanDigits.length > 0) {
         explicitRows = cleanDigits.map(n => parseInt(n, 10)).filter(n => n >= 2 && n <= lastRow);
       }
