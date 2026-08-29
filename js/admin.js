@@ -199,7 +199,7 @@ function clientParseArabicPrompt(prompt) {
     operation = 'DELETE';
   }
 
-  // 1. في حالة الحذف (DELETE): نحدد الصفحة والهدف بدقة
+  // 1. DELETE
   if (operation === 'DELETE') {
     let targetSheet = 'الباقات';
     if (/متطلب|المتطلبات/i.test(text)) targetSheet = 'المتطلبات';
@@ -215,29 +215,34 @@ function clientParseArabicPrompt(prompt) {
       operation: 'DELETE',
       matchColumn: 'الصف',
       matchValue: text,
+      userPrompt: text,
       explanation: `حذف من صفحة [${targetSheet}]: ${text}`,
       data: {}
     };
   }
 
-  // 2. في حالة الإضافة أو التعديل:
-  const isVisa = /فيزا|فيزه|تأشير|تاشير/i.test(text);
-  const isPackage = /باقة|باقه|عرض|سياح|رحلة|عمرة|حج/i.test(text);
-  const isPassport = /(?:جواز|معامل|صاحب الجواز|تتبع)\s*(?:رقم|[A-Za-z0-9٠-٩]{5,})/i.test(text);
-
+  // 2. Classify Sheet
   let targetSheet = 'الباقات';
 
-  if (isPassport && !isVisa && !isPackage && !/سعر|دولار|\$/i.test(text)) {
-    targetSheet = 'جوازات';
-  } else if (/^أضف\s+(?:شروط|متطلبات|وثائق)/i.test(text) && !isVisa && !isPackage) {
-    targetSheet = 'المتطلبات';
-  } else if (/خبر|اخبار|أخبار|اعلان|إعلان|افتتاح فرع/i.test(text) && !isVisa && !isPackage) {
+  const isNews = /^(?:أضف |اضف |نشر |انشر )?(?:خبر|اخبار|أخبار|اعلان|إعلان|بيان)/i.test(text) || /(?:خبر عاجل|خبر صحفي|افتتاح فرع)/i.test(text);
+  const isReq = /^(?:أضف |اضف )?(?:شروط|متطلب|متطلبات|وثائق|أوراق|اوراق|مستندات)/i.test(text);
+  const isPassport = /(?:جواز|جوازات|معاملة|معامله|صاحب الجواز|تتبع)\s*(?:باسم|رقم|صاحب|جاهز|مرفوض|قيد|إصدار|اصدار|[0-9٠-٩]{4,})/i.test(text) ||
+                     /^(?:أضف |اضف |حدث |تحديث )?جواز\b/i.test(text);
+  const isChatbot = /^(?:أضف |اضف )?(?:شات|بوت|معرفة الشات|سؤال للشات)/i.test(text);
+  const isVideo = /^(?:أضف |اضف )?(?:فيديو|يوتيوب)/i.test(text);
+  const isImage = /^(?:أضف |اضف )?(?:صورة|صور|معرض الصور)/i.test(text);
+
+  if (isNews) {
     targetSheet = 'الأخبار';
-  } else if (/شات|بوت|اسئل|أسئل/i.test(text)) {
+  } else if (isReq) {
+    targetSheet = 'المتطلبات';
+  } else if (isPassport && !/(\$|دولار|ر\.س|ريال|السعر للوكيل)/i.test(text)) {
+    targetSheet = 'جوازات';
+  } else if (isChatbot) {
     targetSheet = 'الشات بوت';
-  } else if (/فيديو|يوتيوب/i.test(text)) {
+  } else if (isVideo) {
     targetSheet = 'الفيديو';
-  } else if (/صور|معرض الصور/i.test(text) && !isVisa && !isPackage) {
+  } else if (isImage) {
     targetSheet = 'الصور';
   } else {
     targetSheet = 'الباقات';
@@ -249,12 +254,6 @@ function clientParseArabicPrompt(prompt) {
   const imgMatch = text.match(/https?:\/\/[^\s]+/i);
   if (imgMatch) {
     data['رابط الصورة'] = imgMatch[0];
-  }
-
-  // Passport number
-  const passMatch = text.match(/(?:جواز|رقم)\s*([A-Za-z0-9٠-٩]{4,15})/i) || text.match(/([0-9٠-٩]{6,12})/);
-  if (passMatch) {
-    data['رقم الجواز'] = passMatch[1];
   }
 
   // Price
@@ -272,9 +271,64 @@ function clientParseArabicPrompt(prompt) {
     data['المدة'] = durationMatch[1] || durationMatch[0];
   }
 
-  const destination = extractDestinationSmart(text);
+  if (targetSheet === 'جوازات') {
+    // 1. Passport Number
+    const passMatch = text.match(/(?:رقم الجواز|رقم|جواز|الجواز)\s*[:*]*\s*([A-Za-z0-9٠-٩]{4,15})/i) ||
+                      text.match(/([0-9٠-٩]{5,15})/);
+    if (passMatch) {
+      data['رقم الجواز'] = passMatch[1] || passMatch[0];
+    } else {
+      data['رقم الجواز'] = '000000';
+    }
 
-  if (targetSheet === 'الباقات') {
+    // 2. Client Name
+    const nameMatch = text.match(/(?:باسم|اسم العميل|الاسم|للعميل|للمواطن|صاحب الجواز|للمسافر)\s*[:*]*\s*([^\s,،:*]+(?:\s+[^\s,،:*]+){0,3})/i);
+    if (nameMatch && nameMatch[1]) {
+      let cleanName = nameMatch[1]
+        .replace(/(?:والرقم|ورقم|والحالة|وحالته|والحاله|حالة|رقم|قيد|جاهز|مكتمل|تم|مرفوض).*$/i, '')
+        .trim();
+      data['اسم العميل'] = cleanName || 'عميل';
+    } else {
+      data['اسم العميل'] = 'عميل';
+    }
+
+    // 3. Status
+    if (/تم|جاهز|اصدار|إصدار|مكتمل|تسليم/i.test(text)) {
+      data['الحالة'] = 'تم إصدار التأشيرة بنجاح وجاهز للتسليم';
+    } else if (/مرفوض|رفض/i.test(text)) {
+      data['الحالة'] = 'تم الرفض من السفارة';
+    } else if (/قيد|اجراء|إجراء|متابعة|معالجة/i.test(text)) {
+      data['الحالة'] = 'قيد الإجراء بالسفارة والمتابعة';
+    } else {
+      data['الحالة'] = 'قيد المعالجة والمتابعة';
+    }
+  } else if (targetSheet === 'الأخبار') {
+    const titleMatch = text.match(/(?:بعنوان|عنوانه|عنوان الخبر|العنوان)\s*[:*]*\s*([^\n*]+)/i);
+    if (titleMatch && titleMatch[1]) {
+      data['العنوان'] = titleMatch[1].trim();
+    } else {
+      let cleanTitle = text
+        .replace(/^(?:أضف |اضف |نشر |انشر )?(?:خبر|اخبار|أخبار|اعلان|إعلان)\s*(?:جديد)?\s*(?:بعنوان|:)?/i, '')
+        .trim();
+      data['العنوان'] = cleanTitle.length > 40 ? cleanTitle.substring(0, 40) + '...' : cleanTitle;
+    }
+    data['النص'] = text;
+    data['نشط؟'] = 'نعم';
+  } else if (targetSheet === 'المتطلبات') {
+    data['نوع الخدمة'] = /فيزا|تأشير/i.test(text) ? 'تأشيرات' : (/سياح/i.test(text) ? 'سياحة' : (/عمرة|حج/i.test(text) ? 'عمرة وحج' : 'تأشيرات'));
+    const tabMatch = text.match(/(?:شروط|متطلبات|وثائق|أوراق|اوراق)\s*([^\n:*]+)/i);
+    if (tabMatch && tabMatch[1]) {
+      data['اسم التبويب'] = tabMatch[1].replace(/[:*].*$/, '').trim();
+    } else {
+      data['اسم التبويب'] = 'شروط ' + data['نوع الخدمة'];
+    }
+    data['الوصف'] = text;
+    data['المتطلبات'] = text;
+    data['نشط؟'] = 'نعم';
+  } else {
+    // الباقات
+    const isVisa = /فيزا|فيزه|تأشير|تاشير/i.test(text);
+    const destination = extractDestinationSmart(text);
     data['الوجهة'] = destination;
 
     const titleMatch = text.match(/[*_~]*\s*(فيزا\s+[^\n*]+|فيزه\s+[^\n*]+|تأشيرة\s+[^\n*]+|باقة\s+[^\n*]+)/i);
@@ -287,31 +341,15 @@ function clientParseArabicPrompt(prompt) {
     data['يشمل'] = isVisa ? 'رسوم التأشيرة ومعالجة الطلب والمتابعة' : (/طيران/i.test(text) ? 'تذاكر طيران وفندق وجولات' : 'شامل كافة الخدمات الفندقية والجولات');
     data['الوصف'] = text;
     data['نشط؟'] = 'نعم';
-  } else if (targetSheet === 'جوازات') {
-    if (/تم|جاهز|اصدار|إصدار|مكتمل/i.test(text)) {
-      data['الحالة'] = 'تم إصدار التأشيرة بنجاح وجاهز للتسليم';
-    } else if (/مرفوض|رفض/i.test(text)) {
-      data['الحالة'] = 'تم الرفض من السفارة';
-    } else {
-      data['الحالة'] = 'قيد الإجراء بالسفارة والمتابعة';
-    }
-  } else if (targetSheet === 'الأخبار') {
-    data['العنوان'] = text.replace(/^(?:أضف|نشر|اضف|نشر خبراً|خبر جديد)\s*(?:بعنوان|:)?/i, '').trim();
-    data['النص'] = text;
-    data['نشط؟'] = 'نعم';
-  } else if (targetSheet === 'المتطلبات') {
-    data['نوع الخدمة'] = 'تأشيرات';
-    data['اسم التبويب'] = text;
-    data['الوصف'] = text;
-    data['نشط؟'] = 'نعم';
   }
 
   return {
     targetSheet,
     operation,
-    matchColumn: targetSheet === 'جوازات' ? 'رقم الجواز' : 'اسم الباقة',
-    matchValue: data['رقم الجواز'] || data['اسم الباقة'] || destination,
-    explanation: `تم استيعاب الأمر وتنظيمه في قسم [${targetSheet}]`,
+    matchColumn: targetSheet === 'جوازات' ? 'رقم الجواز' : (targetSheet === 'الأخبار' ? 'العنوان' : (targetSheet === 'المتطلبات' ? 'اسم التبويب' : 'اسم الباقة')),
+    matchValue: data['رقم الجواز'] || data['اسم الباقة'] || data['العنوان'] || data['اسم التبويب'] || '',
+    userPrompt: text,
+    explanation: `تم استيعاب الأمر وتوجيهه لقسم [${targetSheet}]`,
     data
   };
 }
