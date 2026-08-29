@@ -696,14 +696,16 @@ function renderCurrentSheetTable() {
   const rows = sheetData.rows;
 
   let thead = '<thead><tr>';
-  thead += '<th>#</th>';
+  thead += '<th style="width: 50px;">#</th>';
   cols.forEach(c => thead += `<th>${c}</th>`);
+  thead += '<th style="width: 80px; text-align: center;">إجراءات</th>';
   thead += '</tr></thead>';
 
   let tbody = '<tbody>';
   rows.forEach((r, idx) => {
+    const actualRowIndex = r._rowIndex || (idx + 2);
     tbody += '<tr>';
-    tbody += `<td style="color: var(--admin-accent); font-weight: bold;">${idx + 2}</td>`;
+    tbody += `<td style="color: var(--admin-accent); font-weight: bold;">${actualRowIndex}</td>`;
     cols.forEach(c => {
       let val = r[c] || '';
       if (c === 'نشط؟') {
@@ -712,11 +714,62 @@ function renderCurrentSheetTable() {
       }
       tbody += `<td>${val}</td>`;
     });
+    tbody += `<td style="text-align: center;">
+      <button type="button" class="admin-btn-delete-row" onclick="deleteSingleRow('${currentActiveTab}', ${actualRowIndex})" title="حذف هذا الصف مباشرة من Google Sheets">
+        <i class="fas fa-trash-alt"></i> حذف
+      </button>
+    </td>`;
     tbody += '</tr>';
   });
   tbody += '</tbody>';
 
   table.innerHTML = thead + tbody;
+}
+
+async function deleteSingleRow(sheetName, rowIndex) {
+  if (!confirm(`هل أنت متأكد من رغبتك في حذف الصف رقم (${rowIndex}) من صفحة [${sheetName}] نهائياً؟`)) {
+    return;
+  }
+
+  showToast(`جاري حذف الصف رقم ${rowIndex}...`, 'info');
+  const webAppUrl = getWebAppUrl();
+
+  const payload = {
+    targetSheet: sheetName,
+    operation: 'DELETE',
+    matchValue: `الصف رقم ${rowIndex}`,
+    userPrompt: `احذف الصف رقم ${rowIndex} من ${sheetName}`
+  };
+
+  try {
+    let res = null;
+    if (webAppUrl) {
+      res = await sendDirectToGas(webAppUrl, payload);
+    } else {
+      const serverRes = await fetch('/api/admin-agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password: getAdminPassword(),
+          prompt: `احذف الصف رقم ${rowIndex} من ${sheetName}`,
+          webAppUrl: webAppUrl
+        })
+      });
+      if (serverRes.ok) {
+        const json = await serverRes.json();
+        res = json.executionResult;
+      }
+    }
+
+    if (res && (res.success || res.isSimulated)) {
+      showToast(`✅ تم حذف الصف رقم ${rowIndex} بنجاح!`, 'success');
+      setTimeout(() => fetchAllSheetsData(), 1200);
+    } else {
+      showToast(`⚠️ تعذر الحذف: ${res?.error || 'يرجى التحقق من إعدادات الربط'}`, 'error');
+    }
+  } catch (err) {
+    showToast(`❌ خطأ: ${err.message}`, 'error');
+  }
 }
 
 function filterTable(query) {
