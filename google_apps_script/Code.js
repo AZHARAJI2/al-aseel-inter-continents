@@ -3,8 +3,9 @@
  * Al-Aseel Intercontinental Group - Smart Google Sheets API & AI Bridge
  */
 
-// قراءة المفتاح السري من Script Properties (إذا لم يُضبط، يعمل النظام مع تنبيه أمني)
-const ADMIN_SECRET = PropertiesService.getScriptProperties().getProperty('ADMIN_SECRET') || '';
+// قراءة المفتاح السري من Script Properties مع دعم المفتاح الافتراضي لضمان استقرار العمل
+const SCRIPT_SECRET = PropertiesService.getScriptProperties().getProperty('ADMIN_SECRET') || '';
+const DEFAULT_SECRET = 'alaseel_secret_2026';
 
 // قائمة بالأعمدة المعتمدة لكل ورقة
 const SHEET_SCHEMAS = {
@@ -57,21 +58,18 @@ function doPost(e) {
       try {
         const fromBody = JSON.parse(e.postData.contents);
         postData = Object.assign({}, postData, fromBody);
-      } catch (err) { }
+      } catch (err) {}
     }
 
-    const authKey = (postData.secret || postData.authKey || (e && e.parameter && (e.parameter.secret || e.parameter.authKey)) || '').toString().trim();
+    const authKey = postData.secret || postData.authKey || (e && e.parameter && (e.parameter.secret || e.parameter.authKey));
 
-    // التحقق المرن من مفتاح الحماية (يتطابق مع Script Properties أو الرمز السري المعتمد)
-    if (ADMIN_SECRET && ADMIN_SECRET.trim()) {
-      const isValid = (authKey === ADMIN_SECRET ||
-        authKey === 'alaseel_secret_2026' ||
-        authKey === 'alaseel_admin_2026' ||
-        authKey.length >= 8);
-      if (!isValid && authKey !== '') {
+    // التحقق المرن والآمن من المفتاح السري
+    if (SCRIPT_SECRET && SCRIPT_SECRET.trim().length > 0) {
+      const cleanKey = (authKey || '').toString().trim();
+      if (cleanKey !== SCRIPT_SECRET.trim() && cleanKey !== DEFAULT_SECRET) {
         return responseJSON({
           success: false,
-          error: 'غير مصرح - مفتاح الحماية (ADMIN_SECRET) غير صحيح.'
+          error: 'غير مصرح - مفتاح الحماية غير متطابق. يرجى التأكد من تطابق ADMIN_SECRET.'
         }, 401);
       }
     }
@@ -85,7 +83,7 @@ function doPost(e) {
       case 'EXECUTE_ACTION':
         let payload = postData.payload;
         if (typeof payload === 'string') {
-          try { payload = JSON.parse(payload); } catch (pErr) { }
+          try { payload = JSON.parse(payload); } catch (pErr) {}
         }
         if (!payload && (postData.targetSheet || postData.data)) {
           payload = postData;
@@ -122,8 +120,8 @@ function doGet(e) {
       return handlePassportLookup(ss, e.parameter.passport);
     }
 
-    // 2. إذا كان الطلب استعلام بيانات مسموح
-    if (e && e.parameter && e.parameter.action === 'GET_DATA') {
+    // 2. إذا كان الطلب استعلام بيانات
+    if (e && e.parameter && (e.parameter.action === 'GET_DATA' || e.parameter.sheetName)) {
       return handleGetData(ss, e.parameter);
     }
 
@@ -150,7 +148,7 @@ function doGet(e) {
  */
 function findSheetSmart(ss, targetName) {
   if (!targetName) return null;
-
+  
   // 1. مطابقة مباشرة
   let sheet = ss.getSheetByName(targetName);
   if (sheet) return sheet;
@@ -204,9 +202,9 @@ function handlePassportLookup(ss, rawPassport) {
   }
 
   const rows = getSheetRows(sheet);
-  const normalizePass = function (s) {
+  const normalizePass = function(s) {
     if (s == null) return '';
-    const arDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+    const arDigits = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
     let str = String(s).trim();
     for (let i = 0; i < 10; i++) str = str.split(arDigits[i]).join(String(i));
     return str.replace(/[\s\-_/\\.,:;#]/g, '').toLowerCase();
@@ -289,7 +287,7 @@ function handleGetData(ss, params) {
 }
 
 /**
- * تنفيذ الأمر المهيكل الصادر من الذكاء الاصطناعي مع منع التكرار والتحديث الذكي
+ * تنفيذ الأمر المهيكل الصادر من الذكاء الاصطناعي مع منع التكرار والحذف المرن
  */
 function handleExecuteAction(ss, payload) {
   if (!payload || !payload.targetSheet) {
@@ -298,7 +296,7 @@ function handleExecuteAction(ss, payload) {
 
   const sheetName = payload.targetSheet;
   let sheet = findSheetSmart(ss, sheetName);
-
+  
   if (!sheet) {
     sheet = ss.insertSheet(sheetName);
     const headers = SHEET_SCHEMAS[sheetName] || Object.keys(payload.data || {});
@@ -318,18 +316,18 @@ function handleExecuteAction(ss, payload) {
   }
 
   let dataObj = {};
-
+  
   if (payload.data && typeof payload.data === 'object' && Object.keys(payload.data).length > 0) {
     dataObj = payload.data;
   } else if (payload.data && typeof payload.data === 'string') {
-    try { dataObj = JSON.parse(payload.data); } catch (e) { }
+    try { dataObj = JSON.parse(payload.data); } catch(e) {}
   } else if (payload.rowData && typeof payload.rowData === 'object') {
     dataObj = payload.rowData;
   } else if (payload.fields && typeof payload.fields === 'object') {
     dataObj = payload.fields;
   }
-
-  if (Object.keys(dataObj).length === 0) {
+  
+  if (Object.keys(dataObj).length === 0 && opType !== 'DELETE') {
     const metaKeys = ['targetSheet', 'operation', 'action', 'explanation', 'matchColumn', 'matchValue', 'data', 'rowData', 'fields', 'secret', 'authKey'];
     for (const [key, val] of Object.entries(payload)) {
       if (!metaKeys.includes(key) && val !== undefined && val !== null && val !== '') {
@@ -351,7 +349,7 @@ function handleExecuteAction(ss, payload) {
 
     if (lastRow >= 2 && matchVal) {
       const values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
-
+      
       let colIndex = -1;
       const normMatchCol = normalizeKey(matchCol);
       for (let j = 0; j < headers.length; j++) {
@@ -406,7 +404,6 @@ function handleExecuteAction(ss, payload) {
     const lastRow = sheet.getLastRow();
     let existingRowIndex = -1;
 
-    // استخراج المفتاح الأساسي للتحقق من عدم وجوده مسبقاً في الشيت
     let matchHeader = '';
     let matchVal = '';
 
@@ -427,7 +424,6 @@ function handleExecuteAction(ss, payload) {
       }
     }
 
-    // إذا وُجدت بيانات سابقة في الجدول، نفحص لمنع التكرار
     if (matchVal && lastRow >= 2) {
       const values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
       let colIndex = -1;
@@ -463,7 +459,6 @@ function handleExecuteAction(ss, payload) {
       }
     }
 
-    // إذا كان السجل موجوداً مسبقاً، نحدثه لتفادي التكرار
     if (existingRowIndex !== -1) {
       for (let j = 0; j < headers.length; j++) {
         const header = headers[j];
@@ -478,12 +473,11 @@ function handleExecuteAction(ss, payload) {
       updatedRowIndex = existingRowIndex;
       executionMessage = 'تم العثور على [' + matchVal + '] مسبقاً في صفحة [' + sheet.getName() + '] وتم تحديث بياناته بنجاح لمنع التكرار.';
     } else {
-      // إضافة صف جديد نظيف
       const newRow = [];
       for (let j = 0; j < headers.length; j++) {
         const header = headers[j];
         let val = getValueFromDataObj(dataObj, header);
-
+        
         if (!val && normalizeKey(header) === normalizeKey('نشط؟')) {
           val = 'نعم';
         }
@@ -499,7 +493,7 @@ function handleExecuteAction(ss, payload) {
     }
   }
 
-  // 3. عملية الحذف (DELETE)
+  // 3. عملية الحذف الشاملة والمرنة (DELETE)
   else if (opType === 'DELETE') {
     const rawMatch = (payload.matchValue || '').toString().trim();
     const explanation = (payload.explanation || '').toString().trim();
@@ -507,41 +501,84 @@ function handleExecuteAction(ss, payload) {
     const lastRow = sheet.getLastRow();
     let deletedCount = 0;
 
-    const lastRowsRegex = /(?:اخر|أخر|آخر)\s*(\d+)?\s*(?:صفوف|صف|اسطر|سطر|صفوفاً|أسطر)?/i;
-    const isLastRows = lastRowsRegex.test(combinedText) || combinedText.includes('كل الصفوف');
-
-    if (isLastRows && lastRow >= 2) {
-      let countToDelete = 1;
-      const matchNum = combinedText.match(/(?:اخر|أخر|آخر)\s*(\d+)/i) || combinedText.match(/(\d+)\s*(?:صفوف|صف|اسطر|سطر)/i);
-      if (matchNum && matchNum[1]) {
-        countToDelete = parseInt(matchNum[1], 10);
-      } else if (combinedText.includes('صفين') || combinedText.includes('سطرين')) {
-        countToDelete = 2;
-      }
-
-      while (countToDelete > 0 && sheet.getLastRow() >= 2) {
-        sheet.deleteRow(sheet.getLastRow());
-        deletedCount++;
-        countToDelete--;
-      }
-
-      if (deletedCount > 0) {
-        executionMessage = 'تم حذف آخر ' + deletedCount + ' صف من صفحة [' + sheet.getName() + '] بنجاح.';
+    // أ) التحقق من أرقام الصفوف الصريحة (مثل: الصف رقم 4 و 5 أو الصف 4 أو سطر 2 و 3)
+    const rowMatches = combinedText.match(/(?:صف|صفوف|الصفوف|الصف|سطر|أسطر|اسطر)\s*(?:رقم|ارقام|أرقام)?\s*([0-9٠-٩\s,،وand\-]+)/i);
+    let explicitRows = [];
+    if (rowMatches && rowMatches[1]) {
+      const arToEn = function(s) {
+        const arDigits = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
+        let str = String(s);
+        for (let k = 0; k < 10; k++) str = str.split(arDigits[k]).join(String(k));
+        return str;
+      };
+      const cleanDigits = arToEn(rowMatches[1]).match(/\d+/g);
+      if (cleanDigits && cleanDigits.length > 0) {
+        explicitRows = cleanDigits.map(n => parseInt(n, 10)).filter(n => n >= 2 && n <= lastRow);
       }
     }
 
+    if (explicitRows.length > 0) {
+      // الحذف بالترتيب التنازلي للحفاظ على صحة أرقام الصفوف
+      const sortedUniqueRows = Array.from(new Set(explicitRows)).sort((a, b) => b - a);
+      for (const rNum of sortedUniqueRows) {
+        if (rNum <= sheet.getLastRow()) {
+          sheet.deleteRow(rNum);
+          deletedCount++;
+        }
+      }
+      if (deletedCount > 0) {
+        executionMessage = 'تم حذف الصفوف رقم (' + sortedUniqueRows.reverse().join(', ') + ') من صفحة [' + sheet.getName() + '] بنجاح.';
+      }
+    }
+
+    // ب) التحقق من حذف آخر صفوف (مثل: آخر صف أو آخر صفين)
+    if (deletedCount === 0 && lastRow >= 2) {
+      const lastRowsRegex = /(?:اخر|أخر|آخر)\s*(\d+)?\s*(?:صفوف|صف|اسطر|سطر|صفوفاً|أسطر)?/i;
+      const isLastRows = lastRowsRegex.test(combinedText) || combinedText.includes('كل الصفوف');
+
+      if (isLastRows) {
+        let countToDelete = 1;
+        const matchNum = combinedText.match(/(?:اخر|أخر|آخر)\s*(\d+)/i) || combinedText.match(/(\d+)\s*(?:صفوف|صف|اسطر|سطر)/i);
+        if (matchNum && matchNum[1]) {
+          countToDelete = parseInt(matchNum[1], 10);
+        } else if (combinedText.includes('صفين') || combinedText.includes('سطرين')) {
+          countToDelete = 2;
+        }
+
+        while (countToDelete > 0 && sheet.getLastRow() >= 2) {
+          sheet.deleteRow(sheet.getLastRow());
+          deletedCount++;
+          countToDelete--;
+        }
+
+        if (deletedCount > 0) {
+          executionMessage = 'تم حذف آخر ' + deletedCount + ' صف من صفحة [' + sheet.getName() + '] بنجاح.';
+        }
+      }
+    }
+
+    // ج) التحقق من حذف أول صف
     if (deletedCount === 0 && lastRow >= 2) {
       const isFirstRow = /(?:أول|اول|الاول|الأول)\s*(?:صف|سطر|بيانات)?/i.test(combinedText);
-      if (isFirstRow && !isLastRows) {
+      if (isFirstRow) {
         sheet.deleteRow(2);
         deletedCount = 1;
         executionMessage = 'تم حذف أول صف بيانات من صفحة [' + sheet.getName() + '] بنجاح.';
       }
     }
 
+    // د) البحث بالنص والمطابقة في كافة الخلايا
     if (deletedCount === 0 && lastRow >= 2) {
-      const normMatchVal = normalizeKey(rawMatch);
-      if (normMatchVal && normMatchVal !== normalizeKey('الباقات') && normMatchVal !== normalizeKey('حذف')) {
+      // تنظيف النص المراد حذفه من كلمات الأمر العامة
+      const cleanSearch = rawMatch
+        .replace(/^(?:احذف|حذف|ازل|إزالة|امسح|مسح)\s*/i, '')
+        .replace(/^(?:من\s*(?:تبويب|جدول|صفحة|ورقة)?\s*[^\s]+\s*)?/i, '')
+        .replace(/(?:من\s*(?:تبويب|جدول|صفحة|ورقة)?\s*[^\s]+)/i, '')
+        .trim();
+
+      const normMatchVal = normalizeKey(cleanSearch || rawMatch);
+
+      if (normMatchVal && normMatchVal !== normalizeKey('الباقات') && normMatchVal !== normalizeKey('المتطلبات') && normMatchVal !== normalizeKey('حذف')) {
         for (let i = lastRow; i >= 2; i--) {
           const rowVals = sheet.getRange(i, 1, 1, headers.length).getValues()[0];
           let rowMatches = false;
@@ -562,13 +599,13 @@ function handleExecuteAction(ss, payload) {
         }
 
         if (deletedCount > 0) {
-          executionMessage = 'تم حذف ' + deletedCount + ' سطر يطابق "' + rawMatch + '" من صفحة [' + sheet.getName() + '] بنجاح.';
+          executionMessage = 'تم حذف ' + deletedCount + ' سطر يطابق "' + (cleanSearch || rawMatch) + '" من صفحة [' + sheet.getName() + '] بنجاح.';
         }
       }
     }
 
     if (deletedCount === 0) {
-      return responseJSON({ success: false, error: 'لم يتم العثور على أي سطر يطابق: "' + (rawMatch || 'الطلب') + '" في صفحة [' + sheet.getName() + ']' });
+      return responseJSON({ success: false, error: 'لم يتم العثور على أي صف يطابق: "' + (rawMatch || 'الطلب') + '" في صفحة [' + sheet.getName() + ']' });
     }
   }
 
