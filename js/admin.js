@@ -611,13 +611,54 @@ async function fetchAllSheetsData() {
   const refreshBtn = document.getElementById('refreshSheetsBtn');
   if (refreshBtn) refreshBtn.innerHTML = '<i class="fas fa-sync fa-spin"></i> جاري المزامنة...';
 
-  const sheetId = SITE_CONFIG.sheetId;
+  const webAppUrl = getWebAppUrl();
+  const sheetId = SITE_CONFIG.sheetId || localStorage.getItem('alaseel_sheet_id') || '';
 
+  // 1. أولاً: محاولة الجلب المباشر والشامل لكافة الجداول من Google Apps Script
+  if (webAppUrl) {
+    try {
+      const getUrl = webAppUrl + (webAppUrl.includes('?') ? '&' : '?') + 'action=GET_DATA&_t=' + Date.now();
+      const res = await fetch(getUrl);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.allData) {
+          for (const tab of TABS) {
+            const sheetRows = json.allData[tab.name] || [];
+            let cols = [];
+            if (sheetRows.length > 0) {
+              cols = Object.keys(sheetRows[0]).filter(k => k !== '_rowIndex');
+            } else {
+              const defaultSchemas = {
+                'الباقات': ['اسم الباقة', 'الوجهة', 'السعر', 'المدة', 'الوصف', 'يشمل', 'رابط الصورة', 'نشط؟'],
+                'المتطلبات': ['نوع الخدمة', 'اسم التبويب', 'السعر', 'الوصف', 'المتطلبات', 'ملاحظات', 'نشط؟'],
+                'جوازات': ['رقم الجواز', 'اسم العميل', 'الحالة', 'آخر تحديث'],
+                'الأخبار': ['العنوان', 'النص', 'رابط الصورة', 'تاريخ النشر', 'نشط؟'],
+                'الصور': ['رابط الصورة', 'الوصف'],
+                'الفيديو': ['رابط اليوتيوب', 'العنوان', 'نشط؟'],
+                'الشات بوت': ['القسم', 'الموضوع / الخدمة', 'التفاصيل والتعليمات والأسعار', 'نشط؟']
+              };
+              cols = defaultSchemas[tab.name] || [];
+            }
+            cachedSheetsData[tab.name] = { cols: cols, rows: sheetRows };
+            const countBadge = document.getElementById(`count-${tab.name}`);
+            if (countBadge) countBadge.textContent = sheetRows.length;
+          }
+          if (refreshBtn) refreshBtn.innerHTML = '<i class="fas fa-sync"></i> تحديث الجداول';
+          renderCurrentSheetTable();
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('Apps Script GET_DATA call failed, falling back to secondary loaders:', e);
+    }
+  }
+
+  // 2. ثانياً: الجلب الفردي لكل تبويب
   for (const tab of TABS) {
     let rows = null;
     let cols = null;
 
-    // Strategy 1: Fetch via /api/public-data for public sheets
+    // أ) عبر واجهة /api/public-data
     if (['الباقات', 'المتطلبات', 'الأخبار', 'الصور', 'الفيديو'].includes(tab.name)) {
       try {
         const pubRes = await fetch(`/api/public-data?sheet=${encodeURIComponent(tab.name)}&_t=${Date.now()}`);
@@ -625,14 +666,14 @@ async function fetchAllSheetsData() {
           const pubJson = await pubRes.json();
           if (pubJson.success && Array.isArray(pubJson.data)) {
             rows = pubJson.data;
-            cols = pubJson.columns || (rows.length > 0 ? Object.keys(rows[0]) : []);
+            cols = pubJson.columns || (rows.length > 0 ? Object.keys(rows[0]).filter(k => k !== '_rowIndex') : []);
           }
         }
       } catch (_) {}
     }
 
-    // Strategy 2: If sheetId is available, query direct gviz/tq
-    if (!rows && sheetId) {
+    // ب) عبر رابط gviz/tq المباشر إذا كان sheetId متاحاً
+    if ((!rows || rows.length === 0) && sheetId) {
       try {
         const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&headers=1&sheet=${encodeURIComponent(tab.name)}&_t=${Date.now()}`;
         const res = await fetch(url);
@@ -655,8 +696,8 @@ async function fetchAllSheetsData() {
               }
 
               cols = tCols;
-              rows = rawRows.map(r => {
-                const rowObj = {};
+              rows = rawRows.map((r, rIdx) => {
+                const rowObj = { _rowIndex: rIdx + 2 };
                 cols.forEach((col, idx) => {
                   rowObj[col] = (r.c?.[idx] ? (r.c[idx].f != null ? r.c[idx].f : (r.c[idx].v != null ? String(r.c[idx].v) : '')) : '');
                 });
