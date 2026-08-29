@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>لوحة تحكم المشرف الذكية — الأصيل بين القارات</title>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="css/fontawesome/all.min.css">
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body class="admin-body">
+
+  <!-- ═══════════ شاشة تسجيل الدخول والحماية ═══════════ -->
+  <div class="admin-auth-overlay" id="authOverlay">
+    <div class="admin-auth-card">
+      <img src="images/logo.png" alt="شعار الأصيل" class="admin-auth-logo" onerror="this.style.display='none'">
+      <h2 class="admin-auth-title">لوحة تحكم المشرف</h2>
+      <p class="admin-auth-subtitle">الأصيل بين القارات — نظام الإدارة الذكي</p>
+      
+      <form id="authForm">
+        <div class="admin-input-group">
+          <i class="fas fa-lock"></i>
+          <input type="password" id="authPassword" placeholder="أدخل كلمة المرور..." required autocomplete="current-password">
+        </div>
+        <div class="admin-auth-error" id="authError">كلمة المرور غير صحيحة</div>
+        <button type="submit" class="admin-btn-primary" id="authSubmitBtn" style="margin-top: 10px;">
+          <i class="fas fa-sign-in-alt"></i> تسجيل الدخول
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ═══════════ شريط علوي (Admin Header) ═══════════ -->
+  <header class="admin-header">
+    <div class="admin-header-brand">
+      <img src="images/logo.png" alt="شعار الأصيل" onerror="this.style.display='none'">
+      <div>
+        <h1>الأصيل بين القارات</h1>
+        <span>لوحة تحكم المشرف الذكية</span>
+      </div>
+    </div>
+
+    <div class="admin-header-actions">
+      <div class="admin-connection-badge" id="connectionBadge">
+        <i class="fas fa-circle-notch fa-spin"></i> جاري التحقق من الاتصال...
+      </div>
+      <button type="button" class="admin-btn-icon" id="settingsBtn" title="إعدادات الربط">
+        <i class="fas fa-cog"></i> <span>الإعدادات</span>
+      </button>
+      <a href="index.html" class="admin-btn-icon" title="زيارة الموقع">
+        <i class="fas fa-globe"></i> <span>الموقع</span>
+      </a>
+      <button type="button" class="admin-btn-icon" id="logoutBtn" title="تسجيل الخروج">
+        <i class="fas fa-sign-out-alt"></i> <span>خروج</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ═══════════ المحتوى الرئيسي ═══════════ -->
+  <main class="admin-container">
+
+    <!-- 1. قسم الذكاء الاصطناعي (AI Prompt Engine) -->
+    <section class="admin-ai-section">
+      <div class="admin-section-header">
+        <div class="admin-section-title">
+          <i class="fas fa-wand-magic-sparkles" style="color: var(--admin-accent);"></i>
+          <span>المساعد الذكي لإدارة البيانات</span>
+          <span class="admin-ai-badge">Gemini AI</span>
+        </div>
+        <span style="font-size: 13px; color: var(--admin-text-secondary);">
+          أدخل أمرك باللغة العربية وسيقوم الذكاء الاصطناعي بتنفيذه
+        </span>
+      </div>
+
+      <!-- صندوق الأوامر الذكي -->
+      <div class="admin-ai-input-wrapper">
+        <textarea 
+          id="aiPromptInput" 
+          class="admin-ai-textarea"
+          rows="3" 
+          placeholder="اكتب أمرك هنا بالعربية الطبيعية، مثلاً:
+- أضف باقة سياحية لتركيا 7 أيام بسعر 650 دولار تشمل الطيران والفندق
+- عدل سعر تأشيرة العمل في تبويب المتطلبات إلى 6000 ر.س
+- احذف باقة سريلانكا
+- أضف خبراً جديداً: تم فتح باب التسجيل لرحلات العمرة"
+        ></textarea>
+
+        <div class="admin-ai-input-controls">
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button type="button" class="admin-voice-btn" id="voiceBtn" title="إملاء صوتي">
+              <i class="fas fa-microphone"></i>
+            </button>
+            <button type="button" class="admin-btn-icon" onclick="clearPrompt()" title="مسح النص" style="padding: 8px 14px; font-size: 13px;">
+              <i class="fas fa-eraser"></i> مسح
+            </button>
+          </div>
+
+          <button type="button" class="admin-submit-btn" id="aiSubmitBtn" onclick="executeAiCommand()">
+            <i class="fas fa-paper-plane"></i> تنفيذ بالذكاء الاصطناعي
+          </button>
+        </div>
+      </div>
+
+      <!-- اقتراحات سريعة للأوامر -->
+      <div class="admin-chips-container">
+        <span class="admin-chip-label"><i class="fas fa-lightbulb"></i> نماذج سريعة:</span>
+        <button type="button" class="admin-chip" onclick="setPrompt('حدث معاملة الجواز رقم 08912345 واجعل الحالة: تم إصدار التأشيرة بنجاح وجاهز للتسليم')">
+          🛂 تحديث حالة جواز
+        </button>
+        <button type="button" class="admin-chip" onclick="setPrompt('عدل سعر تأشيرة العمل في تبويب المتطلبات إلى 6000 ر.س وأضف ملاحظة: يلزم إجراء فحص طبي معتمد')">
+          🏷️ تعديل سعر وشروط تأشيرة
+        </button>
+        <button type="button" class="admin-chip" onclick="setPrompt('أضف باقة سياحية جديدة لماليزيا 7 أيام بسعر 850 دولار تشمل تذاكر الطيران، الإقامة في فندق 4 نجوم، وجولات سياحية يومية')">
+          ✈️ إضافة باقة سياحية
+        </button>
+        <button type="button" class="admin-chip" onclick="setPrompt('نشر خبر جديد بعنوان: فتح باب التسجيل لموسم العمرة الجديد بأسعار مميزة وخدمات راقية')">
+          📰 نشر خبر جديد
+        </button>
+        <button type="button" class="admin-chip" onclick="setPrompt('أضف معلومة جديدة للشات بوت في قسم التأشيرات عن: متطلبات تأشيرة الزيارة للأبناء فوق 18 سنة')">
+          🤖 تحديث معرفة الشات بوت
+        </button>
+      </div>
+
+      <!-- كارت المعاينة والنتيجة بعد المعالجة -->
+      <div class="admin-response-card" id="aiResponseCard">
+        <div class="admin-response-header">
+          <div class="admin-response-title" id="aiResponseTitle">
+            <i class="fas fa-check-circle"></i> نتيجة معالجة الذكاء الاصطناعي
+          </div>
+          <div class="admin-sheet-badge" id="aiSheetBadge">المتطلبات</div>
+        </div>
+        <div class="admin-response-body" id="aiResponseBody">
+          جاري المعالجة...
+        </div>
+        <table class="admin-data-preview-table" id="aiPreviewTable"></table>
+      </div>
+    </section>
+
+    <!-- 2. متصفح جداول Google Sheets المباشر -->
+    <section class="admin-sheets-section">
+      <div class="admin-section-header">
+        <div class="admin-section-title">
+          <i class="fas fa-table" style="color: var(--admin-accent);"></i>
+          <span>متصفح الجداول المباشر (Google Sheets Live View)</span>
+        </div>
+        <button type="button" class="admin-btn-icon" id="refreshSheetsBtn" onclick="fetchAllSheetsData()">
+          <i class="fas fa-sync"></i> تحديث الجداول
+        </button>
+      </div>
+
+      <!-- أزرار التبويبات الـ 7 -->
+      <div class="admin-tabs-nav" id="tabsNav"></div>
+
+      <!-- شريط البحث والفلترة -->
+      <div class="admin-table-controls">
+        <div class="admin-search-box">
+          <i class="fas fa-search"></i>
+          <input type="text" id="searchInput" placeholder="بحث سريع في هذا الجدول...">
+        </div>
+        <div style="font-size: 13px; color: var(--admin-text-secondary);">
+          💡 البيانات معروضة مباشرة من ملف Google Sheets
+        </div>
+      </div>
+
+      <!-- الجدول المعروض -->
+      <div class="admin-table-wrapper">
+        <table class="admin-table" id="sheetDataTable">
+          <thead>
+            <tr><th>جاري التحميل...</th></tr>
+          </thead>
+          <tbody>
+            <tr><td style="text-align: center; padding: 20px;">يرجى الانتظار، جاري قراءة البيانات من Google Sheets...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ═══════════ نافذة الإعدادات (Settings Modal) ═══════════ -->
+  <div class="admin-modal-overlay" id="settingsModal">
+    <div class="admin-modal-card">
+      <div class="admin-modal-header">
+        <div class="admin-modal-title"><i class="fas fa-cog"></i> إعدادات الربط ولوحة التحكم</div>
+        <button type="button" class="admin-modal-close" id="closeSettingsBtn">&times;</button>
+      </div>
+
+      <form id="settingsForm">
+        <div class="admin-form-group">
+          <label>🔗 رابط تطبيق الويب (Google Apps Script Web App URL):</label>
+          <input type="url" id="settingsGasUrl" placeholder="https://script.google.com/macros/s/.../exec">
+          <div class="admin-form-help">
+            هذا الرابط يتم الحصول عليه بعد نشر ملف <code>google_apps_script/Code.js</code> داخل Google Sheets كتطبيق ويب (Web App) كما هو موضح في دليل <code>README.md</code>.
+          </div>
+        </div>
+
+        <div class="admin-form-group">
+          <div class="admin-form-help" style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); padding: 10px; border-radius: 8px; color: #10b981;">
+            <i class="fas fa-shield-alt"></i> تم تأمين مفاتيح API وإعدادات البيئة تلقائياً على خادم Netlify لضمان أعلى مستويات الحماية.
+          </div>
+        </div>
+
+        <button type="submit" class="admin-btn-primary" style="margin-top: 20px;">
+          <i class="fas fa-save"></i> حفظ الإعدادات
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/admin.js"></script>
+</body>
+</html>
