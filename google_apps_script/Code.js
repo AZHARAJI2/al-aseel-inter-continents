@@ -287,7 +287,140 @@ function handleGetData(ss, params) {
 }
 
 /**
- * تنفيذ الأمر المهيكل الصادر من الذكاء الاصطناعي مع منع التكرار والحذف المرن
+ * دالة المزامنة التلقائية مع تبويب الشات بوت (لكل الجداول ما عدا الجوازات)
+ */
+function syncWithChatbotTab(ss, sourceSheetName, opType, dataObj, targetItemTitle) {
+  try {
+    // 1. استثناء الجوازات والشات بوت نفسه من المزامنة
+    const normSource = normalizeKey(sourceSheetName);
+    if (normSource === normalizeKey('جوازات') || normSource === normalizeKey('الشات بوت')) {
+      return;
+    }
+
+    let chatbotSheet = findSheetSmart(ss, 'الشات بوت');
+    if (!chatbotSheet) {
+      chatbotSheet = ss.insertSheet('الشات بوت');
+      const headers = SHEET_SCHEMAS['الشات بوت'];
+      chatbotSheet.appendRow(headers);
+      chatbotSheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#0a192f').setFontColor('#ffffff');
+    }
+
+    const cbHeaders = getSheetHeaders(chatbotSheet);
+    const cbLastRow = chatbotSheet.getLastRow();
+
+    // ── أ) في حالة الحذف (DELETE): البحث وحذف المعلومة من الشات بوت ──
+    if (opType === 'DELETE') {
+      if (!targetItemTitle || !targetItemTitle.toString().trim()) return;
+      const normTarget = normalizeKey(targetItemTitle);
+      
+      if (cbLastRow >= 2) {
+        for (let i = cbLastRow; i >= 2; i--) {
+          const rowVals = chatbotSheet.getRange(i, 1, 1, Math.max(cbHeaders.length, 4)).getValues()[0];
+          let matchFound = false;
+          
+          for (let j = 0; j < rowVals.length; j++) {
+            const cellVal = normalizeKey(rowVals[j]);
+            if (cellVal && (cellVal === normTarget || cellVal.includes(normTarget) || normTarget.includes(cellVal))) {
+              matchFound = true;
+              break;
+            }
+          }
+          
+          if (matchFound) {
+            chatbotSheet.deleteRow(i);
+          }
+        }
+      }
+      return;
+    }
+
+    // ── ب) في حالة الإضافة أو التعديل (INSERT / UPDATE): تجهيز الحقول وإضافتها/تحديثها ──
+    if (!dataObj || typeof dataObj !== 'object') return;
+
+    let topic = '';
+    let category = '';
+    let details = '';
+
+    if (normSource === normalizeKey('الباقات')) {
+      topic = (dataObj['اسم الباقة'] || dataObj['الوجهة'] || '').toString().trim();
+      const isVisa = topic.includes('فيزا') || topic.includes('تأشير') || (dataObj['الوصف'] && dataObj['الوصف'].includes('فيزا'));
+      category = isVisa ? 'تأشيرات وفيز' : 'عروض وباقات سياحية';
+      
+      const parts = [];
+      if (dataObj['السعر']) parts.push('السعر: ' + dataObj['السعر']);
+      if (dataObj['المدة']) parts.push('المدة: ' + dataObj['المدة']);
+      if (dataObj['الوجهة']) parts.push('الوجهة: ' + dataObj['الوجهة']);
+      if (dataObj['يشمل']) parts.push('يشمل: ' + dataObj['يشمل']);
+      if (dataObj['الوصف']) parts.push('التفاصيل: ' + dataObj['الوصف']);
+      details = parts.join(' | ');
+    } else if (normSource === normalizeKey('المتطلبات')) {
+      topic = (dataObj['اسم التبويب'] || dataObj['نوع الخدمة'] || '').toString().trim();
+      category = 'شروط ومتطلبات ' + (dataObj['نوع الخدمة'] || 'الخدمات');
+      
+      const parts = [];
+      if (dataObj['السعر']) parts.push('الرسوم: ' + dataObj['السعر']);
+      if (dataObj['المتطلبات']) parts.push('المتطلبات: ' + dataObj['المتطلبات']);
+      if (dataObj['الوصف']) parts.push('الوصف: ' + dataObj['الوصف']);
+      if (dataObj['ملاحظات']) parts.push('ملاحظات: ' + dataObj['ملاحظات']);
+      details = parts.join(' | ');
+    } else if (normSource === normalizeKey('الأخبار')) {
+      topic = (dataObj['العنوان'] || '').toString().trim();
+      category = 'أخبار وإعلانات';
+      details = (dataObj['النص'] || '') + (dataObj['تاريخ النشر'] ? ' (تاريخ: ' + dataObj['تاريخ النشر'] + ')' : '');
+    } else if (normSource === normalizeKey('الصور') || normSource === normalizeKey('الفيديو')) {
+      topic = (dataObj['العنوان'] || dataObj['الوصف'] || '').toString().trim();
+      category = normSource === normalizeKey('الصور') ? 'معرض الصور' : 'مكتبة الفيديو';
+      details = (dataObj['الوصف'] || dataObj['العنوان'] || '') + (dataObj['رابط اليوتيوب'] || dataObj['رابط الصورة'] ? ' | الرابط: ' + (dataObj['رابط اليوتيوب'] || dataObj['رابط الصورة']) : '');
+    }
+
+    if (!topic && !details) return;
+    if (!topic) topic = details.substring(0, 30);
+
+    const normTopic = normalizeKey(topic);
+    let existingRow = -1;
+
+    // فحص ما إذا كان الموضوع موجوداً مسبقاً في الشات بوت لتحديثه بدلاً من تكراره
+    if (cbLastRow >= 2) {
+      const cbValues = chatbotSheet.getRange(2, 1, cbLastRow - 1, Math.max(cbHeaders.length, 4)).getValues();
+      for (let i = 0; i < cbValues.length; i++) {
+        const rTopic = normalizeKey(cbValues[i][1] || cbValues[i][0]);
+        if (rTopic && (rTopic === normTopic || rTopic.includes(normTopic) || normTopic.includes(rTopic))) {
+          existingRow = i + 2;
+          break;
+        }
+      }
+    }
+
+    const newRowData = {
+      'القسم': category,
+      'الموضوع / الخدمة': topic,
+      'التفاصيل والتعليمات والأسعار': details,
+      'نشط؟': 'نعم'
+    };
+
+    if (existingRow !== -1) {
+      for (let j = 0; j < cbHeaders.length; j++) {
+        const h = cbHeaders[j];
+        const val = getValueFromDataObj(newRowData, h);
+        if (val !== undefined && val !== '') {
+          chatbotSheet.getRange(existingRow, j + 1).setValue(val);
+        }
+      }
+    } else {
+      const rowToAdd = [];
+      for (let j = 0; j < cbHeaders.length; j++) {
+        const h = cbHeaders[j];
+        rowToAdd.push(getValueFromDataObj(newRowData, h) || (normalizeKey(h) === normalizeKey('نشط؟') ? 'نعم' : ''));
+      }
+      chatbotSheet.appendRow(rowToAdd);
+    }
+  } catch (err) {
+    // عدم إيقاف العملية الأساسية في حال وجود تنبيه بالمزامنة
+  }
+}
+
+/**
+ * تنفيذ الأمر المهيكل الصادر من الذكاء الاصطناعي مع منع التكرار والحذف المرن والمزامنة التلقائية
  */
 function handleExecuteAction(ss, payload) {
   if (!payload || !payload.targetSheet) {
@@ -328,7 +461,7 @@ function handleExecuteAction(ss, payload) {
   }
   
   if (Object.keys(dataObj).length === 0 && opType !== 'DELETE') {
-    const metaKeys = ['targetSheet', 'operation', 'action', 'explanation', 'matchColumn', 'matchValue', 'data', 'rowData', 'fields', 'secret', 'authKey'];
+    const metaKeys = ['targetSheet', 'operation', 'action', 'explanation', 'matchColumn', 'matchValue', 'userPrompt', 'originalPrompt', 'prompt', 'data', 'rowData', 'fields', 'secret', 'authKey'];
     for (const [key, val] of Object.entries(payload)) {
       if (!metaKeys.includes(key) && val !== undefined && val !== null && val !== '') {
         dataObj[key] = val;
@@ -394,12 +527,15 @@ function handleExecuteAction(ss, payload) {
       }
       updatedRowIndex = foundRowIndex;
       executionMessage = 'تم تعديل الصف رقم ' + foundRowIndex + ' في صفحة [' + sheet.getName() + '] بنجاح.';
+
+      // مزامنة التعديل مع الشات بوت
+      syncWithChatbotTab(ss, sheet.getName(), 'UPDATE', dataObj, dataObj['اسم الباقة'] || dataObj['اسم التبويب'] || dataObj['العنوان']);
     } else {
       return responseJSON({ success: false, error: 'لم يتم العثور على الصف المطلوب تعديله في صفحة [' + sheet.getName() + ']' });
     }
   }
 
-  // 2. عملية الإضافة (INSERT) مع منع التكرار الذكي (Deduplication Check)
+  // 2. عملية الإضافة (INSERT) مع منع التكرار الذكي (Deduplication Check) والمزامنة
   else if (opType === 'INSERT') {
     const lastRow = sheet.getLastRow();
     let existingRowIndex = -1;
@@ -471,7 +607,10 @@ function handleExecuteAction(ss, payload) {
         }
       }
       updatedRowIndex = existingRowIndex;
-      executionMessage = 'تم العثور على [' + matchVal + '] مسبقاً في صفحة [' + sheet.getName() + '] وتم تحديث بياناته بنجاح لمنع التكرار.';
+      executionMessage = 'تم العثور على [' + matchVal + '] مسبقاً في صفحة [' + sheet.getName() + '] وتم تحديث بياناته بنجاح لمنع التكرار ومزامنته مع الشات بوت.';
+      
+      // مزامنة التحديث مع الشات بوت
+      syncWithChatbotTab(ss, sheet.getName(), 'UPDATE', dataObj, matchVal);
     } else {
       const newRow = [];
       for (let j = 0; j < headers.length; j++) {
@@ -489,11 +628,14 @@ function handleExecuteAction(ss, payload) {
 
       sheet.appendRow(newRow);
       updatedRowIndex = sheet.getLastRow();
-      executionMessage = 'تمت إضافة [' + (matchVal || 'عنصر جديد') + '] بنجاح إلى صفحة [' + sheet.getName() + '].';
+      executionMessage = 'تمت إضافة [' + (matchVal || 'عنصر جديد') + '] بنجاح إلى صفحة [' + sheet.getName() + '] ومزامنته تلقائياً مع الشات بوت.';
+
+      // مزامنة الإضافة مع الشات بوت
+      syncWithChatbotTab(ss, sheet.getName(), 'INSERT', dataObj, matchVal);
     }
   }
 
-  // 3. عملية الحذف الشاملة والمرنة (DELETE)
+  // 3. عملية الحذف الشاملة والمرنة (DELETE) مع حذف المعلومة من الشات بوت تلقائياً
   else if (opType === 'DELETE') {
     const rawMatch = (payload.matchValue || '').toString().trim();
     const explanation = (payload.explanation || '').toString().trim();
@@ -501,6 +643,7 @@ function handleExecuteAction(ss, payload) {
     const combinedText = userPrompt + ' ' + rawMatch + ' ' + explanation;
     const lastRow = sheet.getLastRow();
     let deletedCount = 0;
+    const deletedTitles = [];
 
     // أ) التحقق من أرقام الصفوف الصريحة (مثل: الصف رقم 4 و 5 أو الصف 5 أو سطر 2 و 3)
     const rowMatches = combinedText.match(/(?:صف|صفوف|الصفوف|الصف|سطر|أسطر|اسطر|رقم|أرقام|ارقام)\s*(?:رقم|ارقام|أرقام)?\s*([0-9٠-٩\s,،وand\-]+)/i) ||
@@ -522,20 +665,23 @@ function handleExecuteAction(ss, payload) {
     }
 
     if (explicitRows.length > 0) {
-      // الحذف بالترتيب التنازلي للحفاظ على صحة أرقام الصفوف
       const sortedUniqueRows = Array.from(new Set(explicitRows)).sort((a, b) => b - a);
       for (const rNum of sortedUniqueRows) {
         if (rNum <= sheet.getLastRow()) {
+          const rowVals = sheet.getRange(rNum, 1, 1, headers.length).getValues()[0];
+          const rowTitle = rowVals[0] || rowVals[1] || '';
+          if (rowTitle) deletedTitles.push(rowTitle.toString());
+
           sheet.deleteRow(rNum);
           deletedCount++;
         }
       }
       if (deletedCount > 0) {
-        executionMessage = 'تم حذف الصفوف رقم (' + sortedUniqueRows.reverse().join(', ') + ') من صفحة [' + sheet.getName() + '] بنجاح.';
+        executionMessage = 'تم حذف الصفوف رقم (' + sortedUniqueRows.reverse().join(', ') + ') من صفحة [' + sheet.getName() + '] ومزامنة الحذف مع الشات بوت بنجاح.';
       }
     }
 
-    // ب) التحقق من حذف آخر صفوف (مثل: آخر صف أو آخر صفين)
+    // ب) التحقق من حذف آخر صفوف
     if (deletedCount === 0 && lastRow >= 2) {
       const lastRowsRegex = /(?:اخر|أخر|آخر)\s*(\d+)?\s*(?:صفوف|صف|اسطر|سطر|صفوفاً|أسطر)?/i;
       const isLastRows = lastRowsRegex.test(combinedText) || combinedText.includes('كل الصفوف');
@@ -550,13 +696,18 @@ function handleExecuteAction(ss, payload) {
         }
 
         while (countToDelete > 0 && sheet.getLastRow() >= 2) {
-          sheet.deleteRow(sheet.getLastRow());
+          const curLast = sheet.getLastRow();
+          const rowVals = sheet.getRange(curLast, 1, 1, headers.length).getValues()[0];
+          const rowTitle = rowVals[0] || rowVals[1] || '';
+          if (rowTitle) deletedTitles.push(rowTitle.toString());
+
+          sheet.deleteRow(curLast);
           deletedCount++;
           countToDelete--;
         }
 
         if (deletedCount > 0) {
-          executionMessage = 'تم حذف آخر ' + deletedCount + ' صف من صفحة [' + sheet.getName() + '] بنجاح.';
+          executionMessage = 'تم حذف آخر ' + deletedCount + ' صف من صفحة [' + sheet.getName() + '] ومزامنة الحذف مع الشات بوت بنجاح.';
         }
       }
     }
@@ -565,15 +716,18 @@ function handleExecuteAction(ss, payload) {
     if (deletedCount === 0 && lastRow >= 2) {
       const isFirstRow = /(?:أول|اول|الاول|الأول)\s*(?:صف|سطر|بيانات)?/i.test(combinedText);
       if (isFirstRow) {
+        const rowVals = sheet.getRange(2, 1, 1, headers.length).getValues()[0];
+        const rowTitle = rowVals[0] || rowVals[1] || '';
+        if (rowTitle) deletedTitles.push(rowTitle.toString());
+
         sheet.deleteRow(2);
         deletedCount = 1;
-        executionMessage = 'تم حذف أول صف بيانات من صفحة [' + sheet.getName() + '] بنجاح.';
+        executionMessage = 'تم حذف أول صف بيانات من صفحة [' + sheet.getName() + '] ومزامنة الحذف مع الشات بوت بنجاح.';
       }
     }
 
     // د) البحث بالنص والمطابقة في كافة الخلايا
     if (deletedCount === 0 && lastRow >= 2) {
-      // تنظيف النص المراد حذفه من كلمات الأمر العامة
       const cleanSearch = rawMatch
         .replace(/^(?:احذف|حذف|ازل|إزالة|امسح|مسح)\s*/i, '')
         .replace(/^(?:من\s*(?:تبويب|جدول|صفحة|ورقة)?\s*[^\s]+\s*)?/i, '')
@@ -597,19 +751,30 @@ function handleExecuteAction(ss, payload) {
           }
 
           if (rowMatches) {
+            const rowTitle = rowVals[0] || rowVals[1] || '';
+            if (rowTitle) deletedTitles.push(rowTitle.toString());
+
             sheet.deleteRow(i);
             deletedCount++;
           }
         }
 
         if (deletedCount > 0) {
-          executionMessage = 'تم حذف ' + deletedCount + ' سطر يطابق "' + (cleanSearch || rawMatch) + '" من صفحة [' + sheet.getName() + '] بنجاح.';
+          executionMessage = 'تم حذف ' + deletedCount + ' سطر يطابق "' + (cleanSearch || rawMatch) + '" من صفحة [' + sheet.getName() + '] ومزامنة الحذف مع الشات بوت بنجاح.';
         }
       }
     }
 
     if (deletedCount === 0) {
       return responseJSON({ success: false, error: 'لم يتم العثور على أي صف يطابق: "' + (rawMatch || 'الطلب') + '" في صفحة [' + sheet.getName() + ']' });
+    }
+
+    // مزامنة حذف العناصر من الشات بوت تلقائياً
+    deletedTitles.forEach(t => {
+      syncWithChatbotTab(ss, sheet.getName(), 'DELETE', null, t);
+    });
+    if (rawMatch) {
+      syncWithChatbotTab(ss, sheet.getName(), 'DELETE', null, rawMatch);
     }
   }
 
@@ -642,18 +807,37 @@ function handleUpdateRow(ss, sheetName, rowIndex, rowData) {
       sheet.getRange(rIdx, j + 1).setValue(val);
     }
   }
-  return responseJSON({ success: true, message: 'تم تعديل الصف رقم ' + rIdx + ' بنجاح' });
+
+  // مزامنة التعديل مع الشات بوت
+  syncWithChatbotTab(ss, sheetName, 'UPDATE', rowData, rowData['اسم الباقة'] || rowData['اسم التبويب'] || rowData['العنوان']);
+
+  return responseJSON({ success: true, message: 'تم تعديل الصف رقم ' + rIdx + ' بنجاح ومزامنته مع الشات بوت.' });
 }
 
 function handleDeleteRow(ss, sheetName, rowIndex) {
   const sheet = findSheetSmart(ss, sheetName);
   if (!sheet) return responseJSON({ success: false, error: 'الورقة غير موجودة' });
+  const headers = getSheetHeaders(sheet);
   const rIdx = parseInt(rowIndex, 10);
   if (isNaN(rIdx) || rIdx < 2 || rIdx > sheet.getLastRow()) {
     return responseJSON({ success: false, error: 'رقم الصف غير صحيح' });
   }
+
+  // قراءة عنوان الصف قبل حذفه لمزامنة حذفه من الشات بوت
+  let rowTitle = '';
+  try {
+    const rowVals = sheet.getRange(rIdx, 1, 1, headers.length).getValues()[0];
+    rowTitle = (rowVals[0] || rowVals[1] || '').toString();
+  } catch(e) {}
+
   sheet.deleteRow(rIdx);
-  return responseJSON({ success: true, message: 'تم حذف الصف رقم ' + rIdx + ' بنجاح' });
+
+  // مزامنة حذف الصف من الشات بوت تلقائياً
+  if (rowTitle) {
+    syncWithChatbotTab(ss, sheetName, 'DELETE', null, rowTitle);
+  }
+
+  return responseJSON({ success: true, message: 'تم حذف الصف رقم ' + rIdx + ' بنجاح ومزامنة الحذف من الشات بوت.' });
 }
 
 function getSheetHeaders(sheet) {
